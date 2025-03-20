@@ -13,3 +13,4 @@ alwaysApply: true
 - Use newest versions of available packages
 - Setup in [package.json](mdc:package.json) 
 - We use yarn on Node 22
+- Don't ever use simulated data!

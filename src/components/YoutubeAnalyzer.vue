@@ -119,10 +119,7 @@ export default defineComponent({
     let audioContext: AudioContext | null = null;
     let analyserNode: AnalyserNode | null = null;
     let animationFrame: number | null = null;
-
-    // Microphone nodes
     let microphoneStream: MediaStream | null = null;
-    let microphoneSource: MediaStreamAudioSourceNode | null = null;
 
     // Computed
     const activeVisualizer = computed(() => {
@@ -214,27 +211,6 @@ export default defineComponent({
       }
     };
 
-    const getMicrophoneInput = async (): Promise<MediaStream> => {
-      try {
-        updateStatus("Requesting microphone access for system audio...");
-        const stream = await navigator.mediaDevices.getUserMedia({
-          audio: {
-            echoCancellation: true,
-            noiseSuppression: true,
-            autoGainControl: true,
-          },
-        });
-        updateStatus("Microphone access granted, using system audio");
-        return stream;
-      } catch (error) {
-        console.error("Error accessing microphone:", error);
-        updateStatus(
-          `Error: ${error instanceof Error ? error.message : String(error)}`
-        );
-        throw error;
-      }
-    };
-
     const initAudio = async (): Promise<void> => {
       try {
         // Create audio context
@@ -247,17 +223,35 @@ export default defineComponent({
         analyserNode.fftSize = FFT_SIZE * 2; // Must be power of 2
         analyserNode.smoothingTimeConstant = 0.5;
 
-        // Since we can't access the YouTube iframe directly due to cross-origin restrictions,
-        // prompt user to share system audio via microphone
-        // Note: This is a workaround - user will need to play audio through speakers and capture with mic
-        microphoneStream = await getMicrophoneInput();
-        microphoneSource =
-          audioContext.createMediaStreamSource(microphoneStream);
-        microphoneSource.connect(analyserNode);
+        // To capture YouTube audio, we'll need to capture system audio
+        // This requires user permission to access their microphone
+        updateStatus("Requesting microphone access to capture system audio...");
 
-        updateStatus(
-          "Audio processing initialized. Play the video and ensure audio is audible"
-        );
+        try {
+          // Try to get microphone stream to capture system audio
+          microphoneStream = await navigator.mediaDevices.getUserMedia({
+            audio: {
+              echoCancellation: false,
+              noiseSuppression: false,
+              autoGainControl: false,
+            },
+          });
+
+          // Create source from microphone stream
+          const micSource =
+            audioContext.createMediaStreamSource(microphoneStream);
+          micSource.connect(analyserNode);
+
+          updateStatus(
+            "System audio capture ready. Turn up your volume and play the video"
+          );
+        } catch (micError) {
+          console.error("Couldn't access microphone:", micError);
+          updateStatus(
+            "Could not access microphone. Please check permissions."
+          );
+          throw micError;
+        }
       } catch (error) {
         console.error("Error initializing audio:", error);
         updateStatus(
@@ -270,36 +264,40 @@ export default defineComponent({
     const processAudioData = (): void => {
       if (!analyserNode) return;
 
-      // Get frequency data from analyzer
-      const frequencyData = new Uint8Array(analyserNode.frequencyBinCount);
-      analyserNode.getByteFrequencyData(frequencyData);
+      try {
+        // Get real frequency data from the analyzer
+        const frequencyData = new Uint8Array(analyserNode.frequencyBinCount);
+        analyserNode.getByteFrequencyData(frequencyData);
 
-      // Convert to magnitudes
-      const magnitudes: number[] = [];
-      const maxFrequencies = Math.min(256, frequencyData.length); // Limit for better visualization
+        // Convert to magnitudes
+        const magnitudes: number[] = [];
+        const maxFrequencies = Math.min(256, frequencyData.length);
 
-      for (let i = 0; i < maxFrequencies; i++) {
-        let magnitude = frequencyData[i];
+        for (let i = 0; i < maxFrequencies; i++) {
+          let magnitude = frequencyData[i];
 
-        // Apply log scale if selected (audio data is already logarithmic, but we can enhance it)
-        if (options.value.logScale && magnitude > 0) {
-          magnitude = Math.log10(magnitude + 1) * 50;
+          // Apply log scale if selected
+          if (options.value.logScale && magnitude > 0) {
+            magnitude = Math.log10(magnitude + 1) * 50;
+          }
+
+          magnitudes.push(magnitude);
         }
 
-        magnitudes.push(magnitude);
-      }
+        // Update reactive data
+        fftData.value = [...magnitudes];
 
-      // Update reactive data
-      fftData.value = [...magnitudes];
-
-      // Add to history (clone the array to avoid reference issues)
-      fftHistory.value.push([...magnitudes]);
-      if (fftHistory.value.length > MAX_HISTORY) {
-        fftHistory.value.shift();
+        // Add to history
+        fftHistory.value.push([...magnitudes]);
+        if (fftHistory.value.length > MAX_HISTORY) {
+          fftHistory.value.shift();
+        }
+      } catch (error) {
+        console.error("Error processing audio data:", error);
       }
     };
 
-    const startAnalysis = async (): void => {
+    const startAnalysis = async (): Promise<void> => {
       if (isAnalyzing.value) return;
 
       try {
@@ -341,11 +339,7 @@ export default defineComponent({
     const cleanupAudio = (): void => {
       stopAnalysis();
 
-      if (microphoneSource) {
-        microphoneSource.disconnect();
-        microphoneSource = null;
-      }
-
+      // Stop the microphone stream
       if (microphoneStream) {
         microphoneStream.getTracks().forEach((track) => track.stop());
         microphoneStream = null;
@@ -417,8 +411,15 @@ export default defineComponent({
           return;
         }
 
-        // Start analysis and play video
+        // Start analysis
         await startAnalysis();
+
+        // Prompt user about system audio
+        updateStatus(
+          "Analysis started - Make sure your system audio is playing through speakers"
+        );
+
+        // Play the YouTube video
         youtubePlayer.playVideo();
       } catch (error) {
         console.error("Error in analysis:", error);
