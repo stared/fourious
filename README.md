@@ -1,20 +1,19 @@
 # Fourious
 
-A web application that displays real-time windowed Fourier transforms visualization.
+A web application that displays real-time windowed Fourier transforms for YouTube audio.
 
 ## Features
 
-- Real-time simulated Fourier transform (FFT) data
-- Canvas-based visualization with multiple display modes:
-  - Spectrogram (frequency over time)
-  - Frequency bars
-  - Line graph
+- Extract audio from YouTube videos
+- Perform real-time windowed Fourier transform (FFT)
+- Visualize frequency spectra using Perspective library from FINOS
 - Built with TypeScript for type safety
-- Self-contained frontend application with no server or external dependencies
+- Both web interface and CLI support
 
 ## Requirements
 
 - Node.js (v14+)
+- FFmpeg (must be installed and accessible in your PATH)
 - Web browser with modern JavaScript support
 
 ## Installation
@@ -34,52 +33,57 @@ yarn install
 
 ## Usage
 
-1. Start the development server:
+### Web Application
+
+1. Start the server and frontend in development mode:
 
 ```bash
+yarn dev
+```
+
+Alternatively, you can start them separately:
+
+```bash
+# Start the server
+yarn dev:server
+
+# In another terminal, start the frontend
 yarn start
 ```
 
 2. Open your browser and go to http://localhost:5173
 
-3. Enter a YouTube URL (for validation only) and click "Analyze"
+3. Enter a YouTube URL and click "Analyze"
 
-4. Click "Pause" to pause the visualization or "Resume" to continue
+### Command Line Interface
 
-5. Try different visualization modes using the selector at the bottom
+For quick testing or analysis via CLI:
 
-## Visualization Controls
+```bash
+yarn test
+```
 
-- **Log Scale**: Toggle logarithmic scaling for frequency magnitudes
-- **Show Peaks**: Highlight frequency peaks in the visualization
-- **Visualization Type**: Switch between different visualization modes
-  - Spectrogram: Shows frequency changes over time (heatmap)
-  - Bars: Shows current frequency magnitudes as vertical bars
-  - Line: Shows frequency spectrum as a continuous line graph
+Or specify a custom YouTube URL:
+
+```bash
+ts-node cli.ts https://www.youtube.com/watch?v=YOUR_VIDEO_ID
+```
 
 ## How It Works
 
-1. The application simulates Fourier transform data with realistic patterns
-2. Various frequency ranges are modeled with time-based variations
-3. The FFT results are visualized using HTML Canvas with different visualization types
-4. The visualization updates in real-time at regular intervals (50ms by default)
+1. The application extracts audio from YouTube videos using ytdl-core
+2. Audio is processed in real-time using FFmpeg to convert to PCM format
+3. Audio frames are processed with a Fast Fourier Transform (FFT) algorithm
+4. The FFT results are visualized using the Perspective library
 
 ## Technology Stack
 
 - TypeScript for type safety
+- Express for the backend server
+- Socket.IO for real-time communication
 - Vite for frontend tooling
-- Canvas API for visualization
+- Perspective for data visualization
 - FFT.js for Fourier transform calculations
-
-## Building for Production
-
-To build the application for production:
-
-```bash
-yarn build
-```
-
-The built files will be in the `dist` directory and can be served with any static file server.
 
 ## License
 

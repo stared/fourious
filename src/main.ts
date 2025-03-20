@@ -1,8 +1,7 @@
 import FFT from "fft.js";
-import { FFTConfig } from "./types";
 
 // Configuration
-const FFT_CONFIG: FFTConfig = {
+const FFT_CONFIG = {
   size: 1024,
   sampleRate: 44100,
   updateIntervalMs: 50,
@@ -10,6 +9,11 @@ const FFT_CONFIG: FFTConfig = {
 
 // Initialize FFT processor
 const fft: FFT = new FFT(FFT_CONFIG.size);
+
+// Audio context and nodes
+let audioContext: AudioContext;
+let analyserNode: AnalyserNode;
+let sourceNode: MediaStreamAudioSourceNode;
 
 // Get DOM elements
 const youtubeUrlInput = document.getElementById(
@@ -67,91 +71,43 @@ function setLoading(isLoading: boolean): void {
   }
 }
 
-// Function to extract YouTube video ID (kept for URL validation)
-function extractYouTubeVideoId(url: string): string | null {
-  const regex =
-    /(?:youtube\.com\/(?:[^\/]+\/.+\/|(?:v|e(?:mbed)?)\/|.*[?&]v=)|youtu\.be\/)([^"&?\/\s]{11})/;
-  const match = url.match(regex);
-  return match ? match[1] : null;
+// Initialize Web Audio API
+async function initAudio(stream: MediaStream): Promise<void> {
+  // Create audio context
+  audioContext = new AudioContext({
+    sampleRate: FFT_CONFIG.sampleRate,
+  });
+
+  // Create analyzer node
+  analyserNode = audioContext.createAnalyser();
+  analyserNode.fftSize = FFT_CONFIG.size * 2; // Must be power of 2
+  analyserNode.smoothingTimeConstant = 0.5;
+
+  // Using microphone input
+  sourceNode = audioContext.createMediaStreamSource(stream);
+  sourceNode.connect(analyserNode);
+  // Don't connect to destination to avoid feedback
 }
 
-// Function to generate mock FFT data
-function generateMockFFTData(): number[] {
-  const data = new Float64Array(FFT_CONFIG.size * 2);
-  const time = Date.now() / 1000; // Use current time to create dynamic patterns
+// Process real-time audio data from analyzer node
+function processAudioData(): void {
+  if (!analyserNode) return;
 
-  // Create a simpler pattern that will be more visible in the visualization
-  for (let i = 0; i < FFT_CONFIG.size * 2; i += 2) {
-    const frequency = i / 2;
-    let amplitude = 0;
+  // Get frequency data from analyzer
+  const frequencyData = new Uint8Array(analyserNode.frequencyBinCount);
+  analyserNode.getByteFrequencyData(frequencyData);
 
-    // Create a few clear frequency bands instead of continuous spectrum
-    // This makes patterns more visible in the visualization
-
-    // Bass frequencies (0-100Hz)
-    if (frequency < 100) {
-      amplitude = 3.0 * Math.sin(time * 1.0) * Math.exp(-frequency / 25);
-    }
-    // Mid-low frequencies (100-200Hz)
-    else if (frequency < 200) {
-      amplitude =
-        2.0 *
-        Math.sin(time * 1.5) *
-        Math.exp((-(frequency - 150) * (frequency - 150)) / 1000);
-    }
-    // Mid frequencies (200-400Hz)
-    else if (frequency < 400) {
-      amplitude =
-        1.5 *
-        Math.sin(time * 2.0) *
-        Math.exp((-(frequency - 300) * (frequency - 300)) / 2000);
-    }
-    // High frequencies (400-800Hz)
-    else if (frequency < 800) {
-      amplitude =
-        1.0 *
-        Math.sin(time * 2.5) *
-        Math.exp((-(frequency - 600) * (frequency - 600)) / 5000);
-    }
-    // Very high frequencies (>800Hz)
-    else {
-      amplitude =
-        0.5 *
-        Math.sin(time * 3.0) *
-        Math.exp((-(frequency - 1000) * (frequency - 1000)) / 10000);
-    }
-
-    // Add a small amount of noise
-    amplitude += (Math.random() - 0.5) * 0.1;
-
-    // Ensure amplitude is never negative for better visualization
-    amplitude = Math.max(0, amplitude);
-
-    data[i] = amplitude; // Real part
-    data[i + 1] = 0; // Imaginary part (zero for real signals)
-  }
-
-  return Array.from(data);
-}
-
-// Process FFT data and update visualization
-function processFFTData(fftOutput: number[]): void {
-  // Convert FFT output to magnitudes
+  // Convert to magnitudes
   const magnitudes: number[] = [];
-  const maxFrequencies = Math.min(256, FFT_CONFIG.size / 2); // Limit for better visualization
+  const maxFrequencies = Math.min(256, frequencyData.length); // Limit for better visualization
 
   for (let i = 0; i < maxFrequencies; i++) {
-    const real = fftOutput[i * 2];
-    const imag = fftOutput[i * 2 + 1];
-    let magnitude = Math.sqrt(real * real + imag * imag);
+    let magnitude = frequencyData[i];
 
-    // Apply log scale if selected
+    // Apply log scale if selected (audio data is already logarithmic, but we can enhance it)
     if (logScaleCheckbox.checked && magnitude > 0) {
-      magnitude = Math.log10(magnitude) * 10;
+      magnitude = Math.log10(magnitude + 1) * 50;
     }
-
-    // Ensure magnitude is never negative
-    magnitude = Math.max(0, magnitude);
 
     magnitudes.push(magnitude);
   }
@@ -242,6 +198,9 @@ function drawSpectrogram(): void {
     }
   }
 
+  // Ensure we have a reasonable maximum
+  maxMagnitude = Math.max(maxMagnitude, 1);
+
   // Draw each history slice
   for (let h = 0; h < historyCount; h++) {
     const x = width - (historyCount - h) * barWidth;
@@ -272,7 +231,7 @@ function drawFrequencyBars(magnitudes: number[]): void {
   }
 
   // Ensure we have a reasonable maximum
-  maxMagnitude = Math.max(maxMagnitude, 0.1);
+  maxMagnitude = Math.max(maxMagnitude, 1);
 
   // Draw bars
   for (let i = 0; i < barCount; i++) {
@@ -310,7 +269,7 @@ function drawLineGraph(magnitudes: number[]): void {
   }
 
   // Ensure we have a reasonable maximum
-  maxMagnitude = Math.max(maxMagnitude, 0.1);
+  maxMagnitude = Math.max(maxMagnitude, 1);
 
   // Start drawing path
   ctx.beginPath();
@@ -366,153 +325,146 @@ function drawLineGraph(magnitudes: number[]): void {
   }
 }
 
-// Analysis state manager with no nullables
+// Analysis state manager
 class AnalysisState {
-  private _interval?: number;
-  private _isPaused = false;
+  private _animationFrame?: number;
+  private _isRunning = false;
 
   get isRunning(): boolean {
-    return typeof this._interval === "number";
-  }
-
-  get isPaused(): boolean {
-    return this._isPaused;
+    return this._isRunning;
   }
 
   start(): void {
-    if (this.isRunning) {
-      return;
-    }
-    this._isPaused = false;
-    this._interval = window.setInterval(() => {
-      if (!this._isPaused) {
-        const fftOutput = generateMockFFTData();
-        processFFTData(fftOutput);
-      }
-    }, FFT_CONFIG.updateIntervalMs);
+    if (this._isRunning) return;
+
+    this._isRunning = true;
+
+    // Start animation loop
+    const loop = () => {
+      if (!this._isRunning) return;
+
+      processAudioData();
+      this._animationFrame = requestAnimationFrame(loop);
+    };
+
+    loop();
   }
 
   stop(): void {
-    if (typeof this._interval === "number") {
-      window.clearInterval(this._interval);
-      this._interval = undefined;
+    if (this._animationFrame) {
+      cancelAnimationFrame(this._animationFrame);
+      this._animationFrame = undefined;
     }
-    this._isPaused = false;
-  }
+    this._isRunning = false;
 
-  togglePause(): void {
-    this._isPaused = !this._isPaused;
+    // Stop audio
+    if (audioContext) {
+      if (audioContext.state !== "closed") {
+        audioContext.suspend();
+      }
+    }
   }
 }
 
 const analysisState = new AnalysisState();
 
+// Function to get microphone input
+async function getMicrophoneInput(): Promise<MediaStream> {
+  try {
+    showStatus("Requesting microphone access...");
+    const stream = await navigator.mediaDevices.getUserMedia({
+      audio: {
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: true,
+      },
+    });
+
+    showStatus("Microphone access granted");
+    return stream;
+  } catch (error) {
+    console.error("Error accessing microphone:", error);
+    showStatus(
+      `Error: ${error instanceof Error ? error.message : String(error)}`
+    );
+    throw error;
+  }
+}
+
 // Function to start analysis
 async function startAnalysis(): Promise<void> {
   try {
-    const youtubeUrl = youtubeUrlInput.value.trim();
-
-    if (!youtubeUrl) {
-      showStatus("Please enter a YouTube URL");
-      return;
-    }
-
-    const videoId = extractYouTubeVideoId(youtubeUrl);
-
-    if (!videoId) {
-      showStatus("Invalid YouTube URL");
-      return;
-    }
-
-    // If already running, toggle pause/resume
+    // If already running, stop analysis
     if (analysisState.isRunning) {
-      analysisState.togglePause();
-
-      if (analysisState.isPaused) {
-        console.log("Pausing analysis");
-        analyzeButton.textContent = "Resume";
-        showStatus("Analysis paused");
-      } else {
-        console.log("Resuming analysis");
-        analyzeButton.textContent = "Pause";
-        showStatus("Analysis resumed");
-      }
+      analysisState.stop();
+      analyzeButton.textContent = "Analyze";
+      showStatus("Analysis stopped");
       return;
     }
 
-    // Initialize visualization
-    console.log("Initializing visualization");
+    // Initialize microphone input
+    showStatus("Initializing microphone...");
+    setLoading(true);
     analyzeButton.disabled = true;
     analyzeButton.textContent = "Setting up...";
-    setLoading(true);
-    showStatus("Setting up visualization...");
 
     // Clear any previous data
     fftHistory.length = 0;
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-    // Short delay to allow UI to update
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    try {
+      // Get microphone input
+      const stream = await getMicrophoneInput();
+      await initAudio(stream);
 
-    // Start generating and processing FFT data
-    analyzeButton.disabled = false;
-    analyzeButton.textContent = "Pause";
-    showStatus("Generating FFT data...");
-    setLoading(false);
+      showStatus("Audio processing started");
+      setLoading(false);
+      analyzeButton.disabled = false;
+      analyzeButton.textContent = "Stop";
 
-    console.log("Starting FFT data generation");
-    analysisState.start();
-    console.log("FFT data generation started");
+      // Start analysis
+      analysisState.start();
+    } catch (micError) {
+      console.error("Microphone initialization failed:", micError);
+      showStatus("Could not access microphone. Check browser permissions.");
+      setLoading(false);
+      analyzeButton.disabled = false;
+      analyzeButton.textContent = "Analyze";
+    }
   } catch (error) {
     console.error("Error in analysis:", error);
     showStatus(
       `Error: ${error instanceof Error ? error.message : String(error)}`
     );
-    stopAnalysis();
     setLoading(false);
+    analyzeButton.disabled = false;
+    analyzeButton.textContent = "Analyze";
   }
-}
-
-// Function to stop analysis
-function stopAnalysis(): void {
-  analysisState.stop();
-  analyzeButton.disabled = false;
-  analyzeButton.textContent = "Analyze";
-  showStatus("Analysis stopped");
 }
 
 // Set up event listeners
 analyzeButton.addEventListener("click", startAnalysis);
 
-// Add event listeners for visualization controls
-logScaleCheckbox.addEventListener("change", () => {
-  // Redraw with current data
-  if (fftHistory.length > 0) {
-    drawVisualization(fftHistory[fftHistory.length - 1]);
-  }
-});
-
-showPeaksCheckbox.addEventListener("change", () => {
-  // Redraw with current data
-  if (fftHistory.length > 0) {
-    drawVisualization(fftHistory[fftHistory.length - 1]);
-  }
-});
-
-visualizationTypeSelect.addEventListener("change", () => {
-  // Redraw with current data
-  if (fftHistory.length > 0) {
-    drawVisualization(fftHistory[fftHistory.length - 1]);
-  }
-});
-
 // Add window unload event to clean up resources
 window.addEventListener("beforeunload", () => {
   analysisState.stop();
+
+  // Clean up audio resources
+  if (sourceNode) {
+    sourceNode.disconnect();
+  }
+
+  if (analyserNode) {
+    analyserNode.disconnect();
+  }
+
+  if (audioContext && audioContext.state !== "closed") {
+    audioContext.close();
+  }
 });
 
 // Initialize on load
 window.addEventListener("load", () => {
-  console.log("Application loaded, initializing...");
-  showStatus("Application loaded");
+  console.log("Application loaded");
+  showStatus("Click 'Analyze' to start audio visualization");
 });
