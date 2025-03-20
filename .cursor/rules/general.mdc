@@ -11,4 +11,5 @@ alwaysApply: true
 - When it doubt, first check basic things (e.g. files around)
 - Type things well - abvoid "any" or nullable types
 - Use newest versions of available packages
-- Setup in [package.json](mdc:package.json)
+- Setup in [package.json](mdc:package.json) 
+- We use yarn on Node 22
