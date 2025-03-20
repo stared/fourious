@@ -1,24 +1,22 @@
 {
   "name": "fourious",
   "version": "1.0.0",
-  "main": "index.js",
-  "license": "MIT",
+  "description": "Real-time audio FFT visualization using Web Audio API",
+  "type": "module",
   "scripts": {
-    "start": "vite",
-    "dev:server": "ts-node server.ts",
-    "dev": "concurrently \"yarn dev:server\" \"yarn start\"",
-    "build": "tsc && vite build",
-    "test": "echo \"Running test on example video\" && ts-node cli.ts https://www.youtube.com/watch?v=hKRUPYrAQoE"
+    "dev": "vite",
+    "build": "vue-tsc && vite build",
+    "preview": "vite preview"
   },
   "dependencies": {
-    "fft.js": "^4.0.4"
+    "fft.js": "^4.0.4",
+    "vue": "^3.3.4"
   },
   "devDependencies": {
-    "@types/express": "^4.17.17",
     "@types/node": "^18.15.11",
-    "concurrently": "^8.0.1",
-    "ts-node": "^10.9.1",
+    "@vitejs/plugin-vue": "^4.2.3",
     "typescript": "^5.0.4",
-    "vite": "^4.5.1"
+    "vite": "^4.5.1",
+    "vue-tsc": "^1.8.3"
   }
 }
