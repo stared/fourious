@@ -1,0 +1,14 @@
+---
+description: 
+globs: 
+alwaysApply: true
+---
+
+# General rules
+
+- Write high-quality, modular, maintainable code
+- Don't repeat yourself
+- When it doubt, first check basic things (e.g. files around)
+- Type things well - abvoid "any" or nullable types
+- Use newest versions of available packages
+- Setup in [package.json](mdc:package.json)
